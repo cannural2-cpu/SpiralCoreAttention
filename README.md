@@ -1,143 +1,163 @@
 # SpiralCoreAttention
 
-**Efficient context reduction for large language models.**  
-An experimental AI infrastructure system designed to reduce long-context cost, latency, and noise while preserving answer quality.
+## Context efficiency for long-context open-weight LLMs
+
+SpiralCoreAttention is an experimental AI infrastructure project for reducing unnecessary context before LLM inference.
+
+The goal is simple: when a model receives a long document, RAG output, or oversized prompt, SpiralCoreAttention selects the most relevant context instead of passing the complete input directly to the model.
+
+This can reduce prompt-processing load, KV-cache memory pressure, and long-context inference latency.
 
 ---
 
-## What Problem Does This Solve?
+## Why this matters
 
-Large language models often receive:
+Long-context LLM workloads often include:
 
-- huge documents  
-- noisy knowledge bases  
-- oversized prompts  
-- repeated irrelevant context  
+- Large documents
+- Document-heavy RAG pipelines
+- Repeated retrieved chunks
+- Noisy knowledge bases
+- Oversized prompts
+- Irrelevant context
 
-This can increase:
+Passing all available context into a model can increase GPU memory usage, latency, and inference cost.
 
-- latency  
-- inference cost  
-- token waste  
-- weaker focus  
-- lower answer quality  
-
-SpiralCoreAttention introduces an **anchor-based context selection layer** that attempts to send only the most useful parts of the context to the model.
+SpiralCoreAttention is designed to evaluate whether a smaller, relevant context can preserve useful information while lowering inference overhead.
 
 ---
 
-## Core Idea
+## How it works
 
-Instead of sending the entire context directly into the model:
+```text
+Raw long-context input
+        ↓
+Anchor-based context selection
+        ↓
+Relevant evidence and reduced context
+        ↓
+Underlying language model
+```
 
-### Raw Input
-100% full context
+SpiralCoreAttention does not replace or retrain the underlying LLM.
 
-### Spiral Input
-Selected anchors + connected evidence + compressed context
-
-### Potential Result
-
-- lower token load  
-- faster responses  
-- reduced compute cost  
-- stronger focus on relevant facts
-
----
-
-## Tested Models
-
-Initial internal benchmarks were conducted on:
-
-- Qwen2.5-32B-Instruct  
-- Qwen2.5-7B-Instruct  
-
-Additional larger-model benchmarking and broader model support are in progress.
+It acts as a context-selection layer before inference.
 
 ---
 
-## Early Internal Benchmark Results
+## Internal validation
 
-Primary published benchmark numbers currently reflect **Qwen2.5-32B-Instruct** results.
+Current internal testing was performed with:
 
-| Task | Speedup | Context Reduction |
-|------|---------|-------------------|
-| Code Debug | 2.38x | 96.88% |
-| Docs Migration QA | 4.42x | 98.96% |
-| Support Incident | 1.87x | 97.66% |
-| Finance Analysis | 1.92x | 98.33% |
+- Model: `Qwen/Qwen2.5-1.5B-Instruct`
+- GPU: NVIDIA GeForce RTX 5090
+- Input size: approximately 17K tokens
+- Test set: 10 synthetic long-context evaluation cases
 
----
+### Internal benchmark signal
 
-## Quality Notes
+| Metric | Baseline | Spiral |
+|---|---:|---:|
+| p95 latency | 1677.67 ms | 1269.83 ms |
+| Mean peak VRAM | 8.836 GB | 6.466 GB |
+| Spiral fallback count | - | 0 / 10 |
 
-- Strong performance on code/debug workloads  
-- Strong performance on document QA tasks  
-- Mixed results on some reasoning-heavy workloads  
-- Quality optimization is actively in progress
+In this internal test, Spiral showed:
 
----
+- Approximately 24% lower p95 latency
+- Approximately 27% lower peak VRAM usage
+- No fallback events across the 10 tested cases
 
-## Why It Matters
+These results are early internal measurements only.
 
-For teams running LLM systems at scale:
-
-- lower GPU cost  
-- faster user experience  
-- cheaper long-context workloads  
-- improved retrieval efficiency  
-- more users per GPU
-
-Even moderate efficiency gains can create meaningful savings at scale.
+They are not a production guarantee and may change depending on model, hardware, context length, prompt distribution, quantisation, serving stack, and output requirements.
 
 ---
 
-## Current Status
+## Quality evaluation
 
-SpiralCoreAttention is currently an early-stage prototype / research project.
+Efficiency alone is not enough.
 
-Current focus areas:
+Every Spiral evaluation includes side-by-side baseline and Spiral output review.
 
-- quality retention  
-- multi-model compatibility  
-- production benchmarking  
-- real-world enterprise workloads  
-- API deployment
+Current observations:
 
----
+- Stronger results on document-heavy and structured context tasks
+- Mixed results on reasoning-heavy or fact-sensitive tasks
+- Quality retention remains an active area of development
 
-## About The Builder
-
-Built independently by a **16-year-old developer** focused on:
-
-- AI infrastructure  
-- efficient inference systems  
-- context optimization  
-- next-generation LLM tooling
+No performance result should be used without output-quality review on the target workload.
 
 ---
 
-## Looking To Connect
+## Current status
 
-Interested in speaking with:
+SpiralCoreAttention is currently an experimental prototype.
 
-- engineers  
-- researchers  
-- startup founders  
-- infrastructure partners  
-- AI product builders
+Validated internally:
+
+- Single-GPU inference
+- Qwen2.5-1.5B-Instruct
+- Synthetic long-context prompts
+- Latency and peak-VRAM comparison
+- Baseline-versus-Spiral reporting
+
+Not yet validated:
+
+- 70B models
+- vLLM integration
+- Multi-GPU inference
+- Production traffic
+- Customer-specific enterprise workloads
+
+---
+
+## Pilot evaluation
+
+SpiralCoreAttention is looking for a small number of technical design partners running long-context open-weight LLM workloads.
+
+The pilot is designed as an isolated benchmark inside the partner's own environment.
+
+Pilot scope:
+
+- 7-day technical validation
+- 10-30 anonymised or synthetic representative prompts
+- Baseline-versus-Spiral comparison
+- p95 latency measurement
+- Peak VRAM measurement
+- Output comparison
+- Fallback reporting
+- No production access required
+- No raw customer-data export required
+
+The purpose of the pilot is to measure real impact on a specific workload before discussing production integration.
+
+---
+
+## Roadmap
+
+- Improve quality retention
+- Improve fallback behaviour
+- Add reproducible benchmark configurations
+- Validate on larger open-weight models
+- Add vLLM support
+- Validate multi-GPU inference
+- Test enterprise long-document and RAG workloads
+- Build production-ready integration options
 
 ---
 
 ## Contact
 
-Open to technical discussions, collaboration opportunities, and serious inquiries.
+Can Yilmaz Nural  
+Founder, SpiralCoreAttention  
 
-**Email:** cannural.contact@gmail.com
+Email: cannural.contact@gmail.com
 
 ---
 
 ## Disclaimer
 
-These are early internal benchmark results on selected workloads.  
-Results may vary depending on model, prompt design, hardware, and use case.
+SpiralCoreAttention is experimental research software.
+
+All benchmark figures in this repository are internal results from a specific model, GPU, configuration, and synthetic test set. Results may vary materially across different models, workloads, hardware, and inference frameworks.
