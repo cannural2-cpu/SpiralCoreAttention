@@ -4,7 +4,7 @@
 
 SpiralCoreAttention is an experimental training-time context-selection project for open-weight language-model fine-tuning.
 
-Before the training forward/backward pass, the prototype selects token blocks from a longer sequence. The goal is to reduce training-step computation and peak GPU memory while measuring whether held-out full-context quality remains acceptable.
+Before the training forward/backward pass, the prototype selects token blocks from a longer sequence. The goal is to reduce training-step computation and peak GPU memory while measuring the held-out full-context quality trade-off against a full-context baseline.
 
 This is research software, not a production training system.
 
@@ -14,7 +14,7 @@ This is research software, not a production training system.
 
 Long-sequence LLM fine-tuning can be expensive because every training step processes the full input sequence.
 
-This may increase:
+This can increase:
 
 - GPU memory use
 - Training-step time
@@ -22,9 +22,9 @@ This may increase:
 - Limits on usable sequence length
 - Experiment turnaround time
 
-SpiralCoreAttention evaluates a simple question:
+SpiralCoreAttention evaluates a specific question:
 
-> Can a selected subset of training context reduce compute and memory cost while retaining acceptable held-out evaluation quality?
+> Can a selected subset of training context reduce compute and memory cost while keeping the held-out full-context quality trade-off within an acceptable range?
 
 ---
 
@@ -44,82 +44,93 @@ Held-out full-context evaluation
 
 The current prototype physically selects token blocks before the training pass.
 
-It does not claim to modify the underlying model’s attention kernel, preserve every dropped token at lower intensity, or replace the base model.
+It does not modify the base model’s attention kernel, preserve every unselected token at lower intensity, or replace the underlying language model.
 
 ---
 
-## Current internal QLoRA validation
+## Main internal result: 7B QLoRA fine-tuning
 
-The main current result is an internal controlled fine-tuning experiment:
+The primary current result is a controlled internal fine-tuning experiment:
 
-- Base model: `Qwen/Qwen2.5-1.5B-Instruct`
-- Fine-tuning method: 4-bit QLoRA
-- GPU: NVIDIA GeForce RTX 5090
-- Sequence length: 2,048 tokens
+- Base model: `Qwen/Qwen2.5-7B-Instruct`
+- Fine-tuning method: 4-bit NF4 QLoRA
+- GPU: NVIDIA RTX PRO 6000 Blackwell Server Edition
+- Sequence length: 4,096 tokens
 - Training steps: 64
+- Context-selection configuration: `keep_ratio=0.60`, `min_keep=512`
 - Dataset: local text corpus with held-out full-context evaluation
-- Baseline and Spiral use the same base model, adapter setup, data split, optimizer, and GPU environment.
+- Repeatability check: three seeds (`17`, `29`, `43`)
 
-| Metric | Baseline | Spiral |
-|---|---:|---:|
-| Mean training-step speed | 1.00× | 1.56× |
-| p50 training-step speed | 1.00× | 1.55× |
-| Peak VRAM | Reference | 1.224 GB lower |
-| Held-out full-context loss difference | — | +0.008957 |
+For each run, baseline and Spiral used the same base model, data split, optimizer, batch size, sequence length, and GPU environment.
+
+| Seed | Training-step speedup | Peak VRAM saved | Held-out full-context loss difference |
+|---|---:|---:|---:|
+| 17 | 1.608× | 3.34 GB | +0.011284 |
+| 29 | 1.608× | 3.34 GB | +0.013205 |
+| 43 | 1.609× | 3.34 GB | +0.012463 |
+
+### Summary across three internal runs
+
+- Mean training-step speedup: approximately **1.608×**
+- Equivalent training-step time reduction: approximately **37.8%**
+- Peak VRAM reduction: **3.34 GB** in all three runs
+- Mean held-out full-context loss difference: approximately **+0.0123**
 
 Interpretation:
 
-- Spiral completed mean training steps approximately **1.56× faster** in this internal configuration.
-- Spiral used **1.224 GB less peak VRAM**.
-- The held-out full-context loss difference was **+0.008957** in this run.
-
-These are early internal measurements from one QLoRA configuration. They are not a production guarantee or a claim about larger models, multi-GPU training, customer workloads, or full-model pretraining.
+- Spiral processed the configured selected context during QLoRA training and completed training steps substantially faster in this specific internal setup.
+- Peak GPU memory was consistently lower.
+- The held-out full-context loss trade-off was positive but stayed in a narrow range across the three runs.
+- These results are encouraging but do not establish universal quality retention.
 
 ---
 
-## Additional controlled training signal
+## Earlier 1.5B QLoRA signal
 
-A smaller custom Transformer benchmark was also run at 4,096 sequence length on RTX 5090.
+An earlier internal pilot used `Qwen/Qwen2.5-1.5B-Instruct` with 4-bit QLoRA on a single RTX 5090:
 
-Across internal runs using a local text corpus:
+- Sequence length: 2,048 tokens
+- Training steps: 64
+- Mean training-step speedup: **1.56×**
+- Peak VRAM reduction: **1.224 GB**
+- Held-out full-context loss difference: **+0.008957**
 
-- Approximately **2.09× mean training-step speedup**
-- Approximately **2.01× p50 training-step speedup**
-- **0.97 GB** lower peak VRAM
-- Held-out full-context loss differences from approximately **+0.0048 to +0.0088**
-
-This supports the research hypothesis, but it is not a substitute for validation on a target model and workload.
+The 7B / 4K result is the primary current benchmark.
 
 ---
 
 ## What is validated today?
 
-- Single-GPU fine-tuning on RTX 5090
-- Qwen2.5-1.5B-Instruct 4-bit QLoRA integration
-- Training-time token-block selection
-- Baseline-versus-Spiral controlled comparison
-- Training-step timing and peak-VRAM reporting
+- Single-GPU QLoRA fine-tuning
+- Qwen2.5 1.5B and 7B model configurations
+- Training-time token-block context selection
+- 2K and 4K sequence-length experiments
+- Controlled baseline-versus-Spiral comparisons
+- Mean, p50, and p95 training-step timing
+- Peak-VRAM reporting
 - Held-out full-context loss reporting
+- Three-seed repeatability check on the 7B / 4K experiment
 - Local text-corpus evaluation
 
 ---
 
 ## What is not validated yet?
 
-- 7B, 14B, 32B, or 70B fine-tuning
+- Customer-specific datasets and quality metrics
+- Longer-duration training convergence
+- 8K+ sequence-length results
+- 14B, 32B, or 70B fine-tuning
 - Multi-GPU or distributed training
 - Full-model pretraining
-- Customer-specific datasets
-- Long-duration training convergence
 - Production training infrastructure integration
 - Guaranteed quality retention
 - Guaranteed GPU-cost savings
 
-Any customer decision should be based on a controlled validation using that customer’s target model, sequence lengths, dataset, quality criteria, and hardware.
+Any customer decision should be based on a controlled validation using the target model, dataset, sequence length, training duration, hardware, and task-quality criteria.
 
 ---
 
-## Reproducing the current QLoRA pilot
+## Reproducing the 7B internal pilot
 
 Install dependencies:
 
@@ -127,21 +138,34 @@ Install dependencies:
 python3 -m pip install -r requirements.txt
 ```
 
-Run the QLoRA comparison:
+Run the primary baseline-versus-Spiral comparison:
 
 ```bash
 python3 training/hf_lora_baseline_vs_spiral.py \
-  --model Qwen/Qwen2.5-1.5B-Instruct \
+  --model Qwen/Qwen2.5-7B-Instruct \
   --data test_data/realtext_50k.txt \
   --steps 64 \
   --batch-size 1 \
-  --seq-len 2048 \
+  --seq-len 4096 \
   --keep-ratio 0.60 \
-  --min-keep 256 \
-  --output outputs/hf_qlora_64step.json
+  --min-keep 512 \
+  --seed 17 \
+  --output outputs/hf_qlora_7b_4096_seed17.json
 ```
 
-The script reports:
+Repeat with:
+
+```bash
+--seed 29
+```
+
+and:
+
+```bash
+--seed 43
+```
+
+The benchmark reports:
 
 - Mean, p50, and p95 training-step timing
 - Peak VRAM
@@ -149,13 +173,13 @@ The script reports:
 - Held-out full-context evaluation loss
 - Baseline-versus-Spiral comparison
 
-Hardware, CUDA version, model version, dataset, training duration, seed, quantisation settings, and sequence length can materially affect results.
+Hardware, CUDA version, model version, dataset, sequence length, training duration, seed, quantisation settings, and selection configuration can materially affect results.
 
 ---
 
 ## No-cost controlled validation
 
-SpiralCoreAttention is looking for a small number of technical design partners that run long-sequence open-weight model fine-tuning.
+SpiralCoreAttention is looking for a small number of technical design partners running long-sequence open-weight model fine-tuning.
 
 The initial validation is no-cost and fixed-scope.
 
@@ -173,7 +197,7 @@ Proposed scope:
 - No raw customer-data export required
 - No obligation to continue if the result is not useful
 
-If the controlled validation shows value, a paid integration or broader evaluation can be discussed afterwards.
+If the validation shows value, a paid integration or broader evaluation can be discussed afterwards.
 
 ---
 
@@ -196,6 +220,6 @@ Email: cannural.contact@gmail.com
 
 SpiralCoreAttention is experimental research software.
 
-All benchmark figures in this repository are internal results from specific model, hardware, dataset, and configuration choices. Results may vary materially across models, sequence lengths, training methods, datasets, seeds, GPUs, and distributed-training setups.
+All benchmark figures in this repository are internal results from specific model, GPU, dataset, and configuration choices. Results may vary materially across models, sequence lengths, training methods, datasets, seeds, GPUs, and distributed-training setups.
 
 Nothing in this repository should be interpreted as a guaranteed performance improvement, a guarantee of quality retention, or a claim about full-model pretraining or 70B-scale training.
