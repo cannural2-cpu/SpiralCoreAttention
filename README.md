@@ -1,156 +1,192 @@
 # SpiralCoreAttention
 
-## Context efficiency for long-context open-weight LLMs
+## Experimental context selection for long-sequence LLM fine-tuning
 
-SpiralCoreAttention is an experimental AI infrastructure project for reducing unnecessary context before LLM inference.
+SpiralCoreAttention is an experimental training-time context-selection project for open-weight language-model fine-tuning.
 
-The goal is simple: when a model receives a long document, RAG output, or oversized prompt, SpiralCoreAttention selects the most relevant context instead of passing the complete input directly to the model.
+Before the training forward/backward pass, the prototype selects token blocks from a longer sequence. The goal is to reduce training-step computation and peak GPU memory while measuring whether held-out full-context quality remains acceptable.
 
-This can reduce prompt-processing load, KV-cache memory pressure, and long-context inference latency.
+This is research software, not a production training system.
 
 ---
 
-## Why this matters
+## What problem does this address?
 
-Long-context LLM workloads often include:
+Long-sequence LLM fine-tuning can be expensive because every training step processes the full input sequence.
 
-- Large documents
-- Document-heavy RAG pipelines
-- Repeated retrieved chunks
-- Noisy knowledge bases
-- Oversized prompts
-- Irrelevant context
+This may increase:
 
-Passing all available context into a model can increase GPU memory usage, latency, and inference cost.
+- GPU memory use
+- Training-step time
+- Fine-tuning cost
+- Limits on usable sequence length
+- Experiment turnaround time
 
-SpiralCoreAttention is designed to evaluate whether a smaller, relevant context can preserve useful information while lowering inference overhead.
+SpiralCoreAttention evaluates a simple question:
+
+> Can a selected subset of training context reduce compute and memory cost while retaining acceptable held-out evaluation quality?
 
 ---
 
 ## How it works
 
 ```text
-Raw long-context input
+Long training sequence
         ↓
-Anchor-based context selection
+Token-block context selection
         ↓
-Relevant evidence and reduced context
+Reduced selected sequence
         ↓
-Underlying language model
+Training forward / backward pass
+        ↓
+Held-out full-context evaluation
 ```
 
-SpiralCoreAttention does not replace or retrain the underlying LLM.
+The current prototype physically selects token blocks before the training pass.
 
-It acts as a context-selection layer before inference.
+It does not claim to modify the underlying model’s attention kernel, preserve every dropped token at lower intensity, or replace the base model.
 
 ---
 
-## Internal validation
+## Current internal QLoRA validation
 
-Current internal testing was performed with:
+The main current result is an internal controlled fine-tuning experiment:
 
-- Model: `Qwen/Qwen2.5-1.5B-Instruct`
+- Base model: `Qwen/Qwen2.5-1.5B-Instruct`
+- Fine-tuning method: 4-bit QLoRA
 - GPU: NVIDIA GeForce RTX 5090
-- Input size: approximately 17K tokens
-- Test set: 10 synthetic long-context evaluation cases
-
-### Internal benchmark signal
+- Sequence length: 2,048 tokens
+- Training steps: 64
+- Dataset: local text corpus with held-out full-context evaluation
+- Baseline and Spiral use the same base model, adapter setup, data split, optimizer, and GPU environment.
 
 | Metric | Baseline | Spiral |
 |---|---:|---:|
-| p95 latency | 1677.67 ms | 1269.83 ms |
-| Mean peak VRAM | 8.836 GB | 6.466 GB |
-| Spiral fallback count | - | 0 / 10 |
+| Mean training-step speed | 1.00× | 1.56× |
+| p50 training-step speed | 1.00× | 1.55× |
+| Peak VRAM | Reference | 1.224 GB lower |
+| Held-out full-context loss difference | — | +0.008957 |
 
-In this internal test, Spiral showed:
+Interpretation:
 
-- Approximately 24% lower p95 latency
-- Approximately 27% lower peak VRAM usage
-- No fallback events across the 10 tested cases
+- Spiral completed mean training steps approximately **1.56× faster** in this internal configuration.
+- Spiral used **1.224 GB less peak VRAM**.
+- The held-out full-context loss difference was **+0.008957** in this run.
 
-These results are early internal measurements only.
-
-They are not a production guarantee and may change depending on model, hardware, context length, prompt distribution, quantisation, serving stack, and output requirements.
-
----
-
-## Quality evaluation
-
-Efficiency alone is not enough.
-
-Every Spiral evaluation includes side-by-side baseline and Spiral output review.
-
-Current observations:
-
-- Stronger results on document-heavy and structured context tasks
-- Mixed results on reasoning-heavy or fact-sensitive tasks
-- Quality retention remains an active area of development
-
-No performance result should be used without output-quality review on the target workload.
+These are early internal measurements from one QLoRA configuration. They are not a production guarantee or a claim about larger models, multi-GPU training, customer workloads, or full-model pretraining.
 
 ---
 
-## Current status
+## Additional controlled training signal
 
-SpiralCoreAttention is currently an experimental prototype.
+A smaller custom Transformer benchmark was also run at 4,096 sequence length on RTX 5090.
 
-Validated internally:
+Across internal runs using a local text corpus:
 
-- Single-GPU inference
-- Qwen2.5-1.5B-Instruct
-- Synthetic long-context prompts
-- Latency and peak-VRAM comparison
-- Baseline-versus-Spiral reporting
+- Approximately **2.09× mean training-step speedup**
+- Approximately **2.01× p50 training-step speedup**
+- **0.97 GB** lower peak VRAM
+- Held-out full-context loss differences from approximately **+0.0048 to +0.0088**
 
-Not yet validated:
-
-- 70B models
-- vLLM integration
-- Multi-GPU inference
-- Production traffic
-- Customer-specific enterprise workloads
+This supports the research hypothesis, but it is not a substitute for validation on a target model and workload.
 
 ---
 
-## Pilot evaluation
+## What is validated today?
 
-SpiralCoreAttention is looking for a small number of technical design partners running long-context open-weight LLM workloads.
+- Single-GPU fine-tuning on RTX 5090
+- Qwen2.5-1.5B-Instruct 4-bit QLoRA integration
+- Training-time token-block selection
+- Baseline-versus-Spiral controlled comparison
+- Training-step timing and peak-VRAM reporting
+- Held-out full-context loss reporting
+- Local text-corpus evaluation
 
-The pilot is designed as an isolated benchmark inside the partner's own environment.
+---
 
-Pilot scope:
+## What is not validated yet?
 
-- 7-day technical validation
-- 10-30 anonymised or synthetic representative prompts
+- 7B, 14B, 32B, or 70B fine-tuning
+- Multi-GPU or distributed training
+- Full-model pretraining
+- Customer-specific datasets
+- Long-duration training convergence
+- Production training infrastructure integration
+- Guaranteed quality retention
+- Guaranteed GPU-cost savings
+
+Any customer decision should be based on a controlled validation using that customer’s target model, sequence lengths, dataset, quality criteria, and hardware.
+
+---
+
+## Reproducing the current QLoRA pilot
+
+Install dependencies:
+
+```bash
+python3 -m pip install -r requirements.txt
+```
+
+Run the QLoRA comparison:
+
+```bash
+python3 training/hf_lora_baseline_vs_spiral.py \
+  --model Qwen/Qwen2.5-1.5B-Instruct \
+  --data test_data/realtext_50k.txt \
+  --steps 64 \
+  --batch-size 1 \
+  --seq-len 2048 \
+  --keep-ratio 0.60 \
+  --min-keep 256 \
+  --output outputs/hf_qlora_64step.json
+```
+
+The script reports:
+
+- Mean, p50, and p95 training-step timing
+- Peak VRAM
+- Retained-token ratio
+- Held-out full-context evaluation loss
 - Baseline-versus-Spiral comparison
-- p95 latency measurement
-- Peak VRAM measurement
-- Output comparison
-- Fallback reporting
+
+Hardware, CUDA version, model version, dataset, training duration, seed, quantisation settings, and sequence length can materially affect results.
+
+---
+
+## No-cost controlled validation
+
+SpiralCoreAttention is looking for a small number of technical design partners that run long-sequence open-weight model fine-tuning.
+
+The initial validation is no-cost and fixed-scope.
+
+Proposed scope:
+
+- One approved fine-tuning workload
+- Customer-owned or customer-approved environment
+- Same model, data split, seed, optimizer, and GPU setup for baseline and Spiral
+- Local or anonymised representative data
+- Training-step latency measurement
+- Peak-VRAM measurement
+- Retained-token reporting
+- Held-out full-context loss comparison
 - No production access required
 - No raw customer-data export required
+- No obligation to continue if the result is not useful
 
-The purpose of the pilot is to measure real impact on a specific workload before discussing production integration.
+If the controlled validation shows value, a paid integration or broader evaluation can be discussed afterwards.
 
 ---
 
-## Roadmap
+## Website
 
-- Improve quality retention
-- Improve fallback behaviour
-- Add reproducible benchmark configurations
-- Validate on larger open-weight models
-- Add vLLM support
-- Validate multi-GPU inference
-- Test enterprise long-document and RAG workloads
-- Build production-ready integration options
+https://spiralcoreattention.com
 
 ---
 
 ## Contact
 
-Can Yilmaz Nural  
-Founder, SpiralCoreAttention  
+Can Yılmaz Nural  
+Founder, SpiralCoreAttention
 
 Email: cannural.contact@gmail.com
 
@@ -160,4 +196,6 @@ Email: cannural.contact@gmail.com
 
 SpiralCoreAttention is experimental research software.
 
-All benchmark figures in this repository are internal results from a specific model, GPU, configuration, and synthetic test set. Results may vary materially across different models, workloads, hardware, and inference frameworks.
+All benchmark figures in this repository are internal results from specific model, hardware, dataset, and configuration choices. Results may vary materially across models, sequence lengths, training methods, datasets, seeds, GPUs, and distributed-training setups.
+
+Nothing in this repository should be interpreted as a guaranteed performance improvement, a guarantee of quality retention, or a claim about full-model pretraining or 70B-scale training.
