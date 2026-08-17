@@ -48,15 +48,15 @@ It does not modify the base model’s attention kernel, preserve every unselecte
 
 ---
 
-## Main internal result: 7B QLoRA fine-tuning
+## Main internal result: 7B QLoRA fine-tuning at 8K sequence length
 
 The primary current result is a controlled internal fine-tuning experiment:
 
 - Base model: `Qwen/Qwen2.5-7B-Instruct`
 - Fine-tuning method: 4-bit NF4 QLoRA
 - GPU: NVIDIA RTX PRO 6000 Blackwell Server Edition
-- Sequence length: 4,096 tokens
-- Training steps: 64
+- Sequence length: 8,192 tokens
+- Training steps: 48
 - Context-selection configuration: `keep_ratio=0.60`, `min_keep=512`
 - Dataset: local text corpus with held-out full-context evaluation
 - Repeatability check: three seeds (`17`, `29`, `43`)
@@ -65,37 +65,46 @@ For each run, baseline and Spiral used the same base model, data split, optimize
 
 | Seed | Training-step speedup | Peak VRAM saved | Held-out full-context loss difference |
 |---|---:|---:|---:|
-| 17 | 1.608× | 3.34 GB | +0.011284 |
-| 29 | 1.608× | 3.34 GB | +0.013205 |
-| 43 | 1.609× | 3.34 GB | +0.012463 |
+| 17 | 1.674× | 6.036 GB | -0.001137 |
+| 29 | 1.675× | 6.036 GB | -0.004034 |
+| 43 | 1.675× | 6.036 GB | -0.000861 |
 
 ### Summary across three internal runs
 
-- Mean training-step speedup: approximately **1.608×**
-- Equivalent training-step time reduction: approximately **37.8%**
-- Peak VRAM reduction: **3.34 GB** in all three runs
-- Mean held-out full-context loss difference: approximately **+0.0123**
+- Mean training-step speedup: approximately **1.675×**
+- Equivalent training-step time reduction: approximately **40.3%**
+- Peak VRAM reduction: **6.036 GB** in all three runs
+- Mean held-out full-context loss difference: approximately **-0.0020**
 
 Interpretation:
 
-- Spiral processed the configured selected context during QLoRA training and completed training steps substantially faster in this specific internal setup.
+- Spiral completed training steps substantially faster in this specific internal setup.
 - Peak GPU memory was consistently lower.
-- The held-out full-context loss trade-off was positive but stayed in a narrow range across the three runs.
+- Held-out full-context loss did not worsen across the three internal runs.
 - These results are encouraging but do not establish universal quality retention.
 
 ---
 
-## Earlier 1.5B QLoRA signal
+## Earlier internal signals
 
-An earlier internal pilot used `Qwen/Qwen2.5-1.5B-Instruct` with 4-bit QLoRA on a single RTX 5090:
+### 7B QLoRA at 4K sequence length
 
-- Sequence length: 2,048 tokens
-- Training steps: 64
+On the same model family with 4K sequences and 64 training steps:
+
+- Mean training-step speedup: approximately **1.608×**
+- Peak VRAM reduction: **3.34 GB**
+- Mean held-out full-context loss difference: approximately **+0.0123**
+- Three internal seeds evaluated
+
+### 1.5B QLoRA at 2K sequence length
+
+An earlier internal pilot using `Qwen/Qwen2.5-1.5B-Instruct` on RTX 5090:
+
 - Mean training-step speedup: **1.56×**
 - Peak VRAM reduction: **1.224 GB**
 - Held-out full-context loss difference: **+0.008957**
 
-The 7B / 4K result is the primary current benchmark.
+The 7B / 8K result is the primary current benchmark.
 
 ---
 
@@ -104,21 +113,20 @@ The 7B / 4K result is the primary current benchmark.
 - Single-GPU QLoRA fine-tuning
 - Qwen2.5 1.5B and 7B model configurations
 - Training-time token-block context selection
-- 2K and 4K sequence-length experiments
+- 2K, 4K, and 8K sequence-length experiments
 - Controlled baseline-versus-Spiral comparisons
 - Mean, p50, and p95 training-step timing
 - Peak-VRAM reporting
 - Held-out full-context loss reporting
-- Three-seed repeatability check on the 7B / 4K experiment
+- Three-seed repeatability checks on 7B experiments
 - Local text-corpus evaluation
 
 ---
 
 ## What is not validated yet?
 
-- Customer-specific datasets and quality metrics
+- Customer-specific datasets and task-quality metrics
 - Longer-duration training convergence
-- 8K+ sequence-length results
 - 14B, 32B, or 70B fine-tuning
 - Multi-GPU or distributed training
 - Full-model pretraining
@@ -130,7 +138,7 @@ Any customer decision should be based on a controlled validation using the targe
 
 ---
 
-## Reproducing the 7B internal pilot
+## Reproducing the primary 7B / 8K pilot
 
 Install dependencies:
 
@@ -138,19 +146,19 @@ Install dependencies:
 python3 -m pip install -r requirements.txt
 ```
 
-Run the primary baseline-versus-Spiral comparison:
+Run the baseline-versus-Spiral comparison:
 
 ```bash
 python3 training/hf_lora_baseline_vs_spiral.py \
   --model Qwen/Qwen2.5-7B-Instruct \
   --data test_data/realtext_50k.txt \
-  --steps 64 \
+  --steps 48 \
   --batch-size 1 \
-  --seq-len 4096 \
+  --seq-len 8192 \
   --keep-ratio 0.60 \
   --min-keep 512 \
   --seed 17 \
-  --output outputs/hf_qlora_7b_4096_seed17.json
+  --output outputs/hf_qlora_7b_8192_seed17.json
 ```
 
 Repeat with:
